@@ -2,7 +2,10 @@ const appState = {
   authenticated: Boolean(window.__APP_BOOTSTRAP__?.authenticated),
   conversations: [],
   activeConversationId: null,
+  activeMessages: [],
   isSending: false,
+  isLiveStreaming: false,
+  messagePollTimer: null,
 };
 
 const elements = {
@@ -23,6 +26,13 @@ const elements = {
   composerError: document.querySelector("#composer-error"),
   sendButton: document.querySelector("#send-button"),
 };
+
+function createRequestId() {
+  if (window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+  return `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -192,31 +202,113 @@ function renderConversations() {
   }
 }
 
-function renderMessages(messages) {
-  elements.messageList.innerHTML = "";
-  for (const message of messages) {
-    appendMessage(message.role, message.content);
+function getAssistantPlaceholder(message) {
+  if (message.status === "failed") {
+    return message.error || "Generation failed.";
   }
-  elements.messageList.scrollTop = elements.messageList.scrollHeight;
+  if (message.status === "pending") {
+    return "Thinking…";
+  }
+  if (message.status === "streaming" && !message.content) {
+    return "Thinking…";
+  }
+  return "";
 }
 
-function appendMessage(role, content) {
+function appendMessage(message) {
   const article = document.createElement("article");
-  article.className = `message message--${role}`;
-  setMessageContent(article, role, content);
+  article.className = `message message--${message.role}`;
+  article.dataset.messageId = String(message.id);
+  setMessageContent(article, message);
+
+  if (message.status !== "completed") {
+    const status = document.createElement("p");
+    status.className = "message-status";
+    status.textContent =
+      message.status === "failed" ? message.error || "Failed" : "In progress…";
+    article.append(status);
+  }
+
   elements.messageList.append(article);
-  elements.messageList.scrollTop = elements.messageList.scrollHeight;
   return article;
 }
 
-function setMessageContent(node, role, content) {
-  if (role === "assistant") {
-    node.dataset.rawContent = content;
-    renderMarkdown(node, content);
+function setMessageContent(node, message) {
+  if (message.role === "assistant") {
+    const placeholder = getAssistantPlaceholder(message);
+    node.dataset.rawContent = message.content || "";
+    if (message.content) {
+      renderMarkdown(node, message.content);
+      return;
+    }
+    node.textContent = placeholder;
     return;
   }
 
-  node.textContent = content;
+  node.textContent = message.content;
+}
+
+function renderMessages(messages) {
+  appState.activeMessages = messages;
+  elements.messageList.innerHTML = "";
+  for (const message of messages) {
+    appendMessage(message);
+  }
+  elements.messageList.scrollTop = elements.messageList.scrollHeight;
+  scheduleMessagePolling();
+}
+
+function updateMessageNode(messageId, nextContent) {
+  const node = elements.messageList.querySelector(`[data-message-id="${messageId}"]`);
+  if (!node) {
+    return;
+  }
+
+  const message = appState.activeMessages.find((entry) => entry.id === messageId);
+  if (!message) {
+    return;
+  }
+
+  message.content = nextContent;
+  message.status = "streaming";
+  node.innerHTML = "";
+  setMessageContent(node, message);
+  const status = document.createElement("p");
+  status.className = "message-status";
+  status.textContent = "In progress…";
+  node.append(status);
+  elements.messageList.scrollTop = elements.messageList.scrollHeight;
+}
+
+function clearMessagePolling() {
+  if (appState.messagePollTimer) {
+    window.clearTimeout(appState.messagePollTimer);
+    appState.messagePollTimer = null;
+  }
+}
+
+function scheduleMessagePolling() {
+  clearMessagePolling();
+  if (appState.isLiveStreaming || !appState.activeConversationId) {
+    return;
+  }
+
+  const hasInFlightMessage = appState.activeMessages.some((message) =>
+    ["pending", "streaming"].includes(message.status),
+  );
+  if (!hasInFlightMessage) {
+    return;
+  }
+
+  appState.messagePollTimer = window.setTimeout(async () => {
+    appState.messagePollTimer = null;
+    try {
+      await loadConversationMessages(appState.activeConversationId);
+    } catch (error) {
+      setComposerError(error.message);
+      scheduleMessagePolling();
+    }
+  }, 1500);
 }
 
 function setStatus(text) {
@@ -260,11 +352,24 @@ async function refreshConversations() {
     return;
   }
 
-  if (!appState.conversations.length) {
-    appState.activeConversationId = null;
-    elements.conversationTitle.textContent = "New conversation";
-    elements.messageList.innerHTML = "";
+  if (appState.activeConversationId) {
+    const stillExists = appState.conversations.some(
+      (conversation) => conversation.id === appState.activeConversationId,
+    );
+    if (stillExists) {
+      return;
+    }
   }
+
+  if (!appState.conversations.length) {
+    resetConversationView();
+  }
+}
+
+async function loadConversationMessages(conversationId) {
+  const messages = await request(`/api/conversations/${conversationId}/messages`);
+  renderMessages(messages);
+  return messages;
 }
 
 async function selectConversation(conversationId) {
@@ -274,9 +379,7 @@ async function selectConversation(conversationId) {
   );
   elements.conversationTitle.textContent = active?.title || "Conversation";
   renderConversations();
-
-  const messages = await request(`/api/conversations/${conversationId}/messages`);
-  renderMessages(messages);
+  await loadConversationMessages(conversationId);
 }
 
 async function handleLogin(event) {
@@ -300,17 +403,21 @@ async function handleLogin(event) {
 }
 
 async function handleLogout() {
+  clearMessagePolling();
   await request("/api/auth/logout", { method: "POST" });
   appState.authenticated = false;
   appState.conversations = [];
   appState.activeConversationId = null;
+  appState.activeMessages = [];
   renderAuthState();
   renderConversations();
-  renderMessages([]);
+  elements.messageList.innerHTML = "";
 }
 
 function resetConversationView() {
+  clearMessagePolling();
   appState.activeConversationId = null;
+  appState.activeMessages = [];
   elements.conversationTitle.textContent = "New conversation";
   elements.messageList.innerHTML = "";
 }
@@ -327,11 +434,15 @@ async function handleSend(event) {
     return;
   }
 
+  const requestId = createRequestId();
   setComposerError();
+  clearMessagePolling();
   updateSendingState(true);
-  appendMessage("user", prompt);
-  const assistantNode = appendMessage("assistant", "");
+  appState.isLiveStreaming = true;
   elements.promptInput.value = "";
+
+  let assistantMessageId = null;
+  let conversationId = appState.activeConversationId;
 
   try {
     const response = await fetch("/api/chat/stream", {
@@ -341,6 +452,7 @@ async function handleSend(event) {
       body: JSON.stringify({
         prompt,
         conversation_id: appState.activeConversationId,
+        request_id: requestId,
       }),
     });
 
@@ -373,23 +485,34 @@ async function handleSend(event) {
         const payload = JSON.parse(dataMatch[1]);
 
         if (eventName === "conversation") {
-          appState.activeConversationId = payload.conversation_id;
+          conversationId = payload.conversation_id;
+          assistantMessageId = payload.assistant_message_id;
+          appState.activeConversationId = conversationId;
           elements.conversationTitle.textContent = payload.title;
           await refreshConversations();
-        } else if (eventName === "chunk") {
-          const nextContent = `${assistantNode.dataset.rawContent || ""}${payload.content}`;
-          setMessageContent(assistantNode, "assistant", nextContent);
+          await selectConversation(conversationId);
+        } else if (eventName === "chunk" && assistantMessageId) {
+          const targetMessage = appState.activeMessages.find(
+            (message) => message.id === assistantMessageId,
+          );
+          const currentContent = targetMessage?.content || "";
+          updateMessageNode(assistantMessageId, `${currentContent}${payload.content}`);
         } else if (eventName === "error") {
           throw new Error(payload.detail);
+        } else if (eventName === "done" && conversationId) {
+          await loadConversationMessages(conversationId);
         }
       }
     }
   } catch (error) {
-    assistantNode.textContent = "";
-    assistantNode.remove();
     setComposerError(error.message);
+    if (conversationId) {
+      await loadConversationMessages(conversationId);
+    }
   } finally {
+    appState.isLiveStreaming = false;
     updateSendingState(false);
+    scheduleMessagePolling();
   }
 }
 

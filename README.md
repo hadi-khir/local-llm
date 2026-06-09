@@ -8,6 +8,7 @@ A lightweight AI chat app with:
 - **Built-in markdown rendering for assistant replies, including fenced code blocks**
 - **Session-based login**
 - **SSE streaming from backend to browser**
+- **Disconnect-resilient generation so mobile reconnects can recover in-progress replies**
 
 ## Architecture
 

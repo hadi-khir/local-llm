@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
+from uuid import uuid4
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -14,6 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import authenticate_user, require_authenticated_user
 from app.config import Settings, get_settings
+from app.generation import GenerationManager
 from app.ollama import OllamaClient
 from app.schemas import ChatRequest, ConversationResponse, LoginRequest, MessageResponse
 from app.storage import Storage, build_conversation_title
@@ -32,6 +35,7 @@ STATIC_VERSION = str(
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.storage.initialize()
+    app.state.storage.mark_incomplete_generations_failed()
     yield
 
 
@@ -42,11 +46,13 @@ def create_app() -> FastAPI:
         base_url=settings.ollama_base_url,
         model=settings.ollama_model,
     )
+    generation_manager = GenerationManager(storage=storage, ollama=ollama_client)
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.state.settings = settings
     app.state.storage = storage
     app.state.ollama = ollama_client
+    app.state.generation_manager = generation_manager
 
     app.add_middleware(
         SessionMiddleware,
@@ -137,47 +143,103 @@ def create_app() -> FastAPI:
     )
     async def stream_chat(payload: ChatRequest, request: Request) -> StreamingResponse:
         storage: Storage = request.app.state.storage
-        conversation_id = payload.conversation_id
-        if conversation_id is None:
-            conversation_id = storage.create_conversation(
-                build_conversation_title(payload.prompt)
+        generation_manager: GenerationManager = request.app.state.generation_manager
+        request_id = payload.request_id or uuid4().hex
+
+        generation_job = storage.get_generation_job(request_id)
+        if generation_job is None:
+            conversation_id = payload.conversation_id
+            if conversation_id is None:
+                conversation_id = storage.create_conversation(
+                    build_conversation_title(payload.prompt)
+                )
+            elif not storage.conversation_exists(conversation_id):
+                raise HTTPException(status_code=404, detail="Conversation not found.")
+
+            user_message_id = storage.add_message(conversation_id, "user", payload.prompt)
+            assistant_message_id = storage.add_message(
+                conversation_id,
+                "assistant",
+                "",
+                status="pending",
             )
-        elif not storage.conversation_exists(conversation_id):
+            storage.create_generation_job(
+                request_id,
+                conversation_id,
+                user_message_id,
+                assistant_message_id,
+            )
+            model_messages = storage.get_model_messages(
+                conversation_id,
+                before_message_id=assistant_message_id,
+            )
+            generation_manager.start(
+                request_id=request_id,
+                assistant_message_id=assistant_message_id,
+                model_messages=model_messages,
+            )
+            generation_job = storage.get_generation_job(request_id)
+
+        if generation_job is None:
+            raise HTTPException(status_code=500, detail="Unable to start generation.")
+
+        conversation = storage.get_conversation(generation_job["conversation_id"])
+        if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found.")
 
-        storage.add_message(conversation_id, "user", payload.prompt)
-        history = storage.get_messages(conversation_id)
-        model_messages = [
-            {"role": message["role"], "content": message["content"]}
-            for message in history
-        ]
+        assistant_message_id = int(generation_job["assistant_message_id"])
 
         async def event_stream() -> AsyncIterator[str]:
             yield _sse_message(
                 "conversation",
                 {
-                    "conversation_id": conversation_id,
-                    "title": build_conversation_title(payload.prompt),
+                    "conversation_id": generation_job["conversation_id"],
+                    "assistant_message_id": assistant_message_id,
+                    "request_id": request_id,
+                    "title": conversation["title"],
                 },
             )
 
-            full_response: list[str] = []
-            try:
-                async for chunk in request.app.state.ollama.stream_chat(model_messages):
-                    full_response.append(chunk)
+            sent_length = 0
+            while True:
+                message = storage.get_message(assistant_message_id)
+                if message is None:
+                    yield _sse_message(
+                        "error",
+                        {"detail": "Assistant message no longer exists."},
+                    )
+                    return
+
+                content = message["content"]
+                if len(content) > sent_length:
+                    chunk = content[sent_length:]
+                    sent_length = len(content)
                     yield _sse_message("chunk", {"content": chunk})
-            except (httpx.HTTPError, ValueError) as exc:
-                yield _sse_message(
-                    "error",
-                    {"detail": f"Ollama request failed: {exc.__class__.__name__}"},
-                )
-                return
 
-            assistant_message = "".join(full_response).strip()
-            if assistant_message:
-                storage.add_message(conversation_id, "assistant", assistant_message)
+                if message["status"] == "completed":
+                    yield _sse_message(
+                        "done",
+                        {
+                            "assistant_message_id": assistant_message_id,
+                            "conversation_id": generation_job["conversation_id"],
+                            "request_id": request_id,
+                        },
+                    )
+                    return
 
-            yield _sse_message("done", {"conversation_id": conversation_id})
+                if message["status"] == "failed":
+                    yield _sse_message(
+                        "error",
+                        {
+                            "assistant_message_id": assistant_message_id,
+                            "conversation_id": generation_job["conversation_id"],
+                            "detail": message["error"] or "Generation failed.",
+                            "request_id": request_id,
+                        },
+                    )
+                    return
+
+                await asyncio.sleep(0.25)
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
