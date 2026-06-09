@@ -1,0 +1,287 @@
+:root {
+  color-scheme: dark;
+  --bg: #13161d;
+  --panel: #1b2029;
+  --panel-soft: #202632;
+  --panel-border: #30394a;
+  --text: #edf2ff;
+  --muted: #99a3b8;
+  --accent: #6aa4ff;
+  --accent-strong: #8ab8ff;
+  --danger: #ff7b7b;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(106, 164, 255, 0.14), transparent 35%),
+    var(--bg);
+  color: var(--text);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  padding: 24px;
+  border-right: 1px solid var(--panel-border);
+  background: rgba(19, 22, 29, 0.9);
+}
+
+.sidebar__header,
+.chat-app__header,
+.composer__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.sidebar__header h1,
+.chat-app__header h2 {
+  margin: 0;
+}
+
+.status-pill {
+  margin: 20px 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--panel);
+}
+
+.conversation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.conversation-button {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.conversation-button:hover,
+.conversation-button.is-active {
+  background: var(--panel-soft);
+  border-color: var(--panel-border);
+}
+
+.chat-panel {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 32px;
+}
+
+.card,
+.chat-app {
+  width: min(960px, 100%);
+  background: rgba(27, 32, 41, 0.9);
+  border: 1px solid var(--panel-border);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+}
+
+.login-card {
+  margin: auto;
+  padding: 32px;
+}
+
+.chat-app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+}
+
+.chat-app__header {
+  padding: 24px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.message {
+  max-width: min(80ch, 90%);
+  padding: 16px 18px;
+  border-radius: 18px;
+  line-height: 1.5;
+}
+
+.message--user {
+  align-self: flex-end;
+  background: rgba(106, 164, 255, 0.14);
+  border: 1px solid rgba(106, 164, 255, 0.3);
+  white-space: pre-wrap;
+}
+
+.message--assistant {
+  align-self: flex-start;
+  background: var(--panel-soft);
+  border: 1px solid var(--panel-border);
+}
+
+.message--assistant > :first-child {
+  margin-top: 0;
+}
+
+.message--assistant > :last-child {
+  margin-bottom: 0;
+}
+
+.message--assistant p,
+.message--assistant ul,
+.message--assistant ol,
+.message--assistant pre,
+.message--assistant blockquote {
+  margin: 0 0 1em;
+}
+
+.message--assistant ul,
+.message--assistant ol {
+  padding-left: 1.5rem;
+}
+
+.message--assistant :not(pre) > code {
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.45rem;
+  background: rgba(255, 255, 255, 0.08);
+  font-family:
+    "SFMono-Regular", SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+
+.message--assistant pre {
+  overflow-x: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  background: #0f141d;
+}
+
+.message--assistant pre code {
+  display: block;
+  font-family:
+    "SFMono-Regular", SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 0.92rem;
+}
+
+.message--assistant a {
+  color: var(--accent-strong);
+}
+
+.message--assistant blockquote {
+  padding-left: 1rem;
+  border-left: 3px solid rgba(138, 184, 255, 0.45);
+  color: var(--muted);
+}
+
+.composer {
+  padding: 24px;
+  border-top: 1px solid var(--panel-border);
+}
+
+.composer textarea,
+.stack input {
+  width: 100%;
+  padding: 14px 16px;
+  margin-top: 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  color: var(--text);
+  background: #121722;
+}
+
+.composer textarea {
+  resize: vertical;
+  min-height: 88px;
+}
+
+.primary-button,
+.ghost-button {
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  cursor: pointer;
+}
+
+.primary-button {
+  color: #08101f;
+  background: linear-gradient(180deg, var(--accent-strong), var(--accent));
+  border: none;
+}
+
+.ghost-button {
+  background: transparent;
+  color: var(--text);
+}
+
+.error-text {
+  color: var(--danger);
+  margin: 0;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+@media (max-width: 960px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--panel-border);
+  }
+
+  .chat-panel {
+    padding: 20px;
+  }
+}
