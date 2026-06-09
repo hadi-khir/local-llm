@@ -1,4 +1,4 @@
-# local-ai-vm-chat
+# local-llm
 
 A lightweight AI chat app with:
 
@@ -45,6 +45,25 @@ Open http://127.0.0.1:8000.
 - Keep `SESSION_COOKIE_SECURE=true` in production.
 - Put the app behind a reverse proxy such as Caddy or Nginx for TLS termination.
 - Do not expose Ollama directly through the VM or your home router.
+
+## Docker Compose
+
+```bash
+cd /srv/local-ai-vm-chat
+mkdir -p data
+sudo docker compose up -d --build
+```
+
+- The container is named `local-llm`.
+- SQLite data is persisted in `./data/app.db`.
+- The app is published only on `127.0.0.1:8000`, so nginx can proxy it safely.
+
+For updates:
+
+```bash
+cd /srv/local-ai-vm-chat
+sudo docker compose up -d --build
+```
 
 ## Tests
 

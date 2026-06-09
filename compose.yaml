@@ -1,0 +1,14 @@
+services:
+  app:
+    build:
+      context: .
+    container_name: local-llm
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /data/app.db
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/data

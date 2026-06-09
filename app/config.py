@@ -12,11 +12,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = "Local AI VM Chat"
+    app_name: str = "Local LLM"
     secret_key: str = Field(..., alias="SECRET_KEY")
     admin_username: str = Field(..., alias="ADMIN_USERNAME")
     admin_password: str = Field(..., alias="ADMIN_PASSWORD")
-    session_cookie_name: str = Field("local_ai_session", alias="SESSION_COOKIE_NAME")
+    session_cookie_name: str = Field("local_llm_session", alias="SESSION_COOKIE_NAME")
     session_cookie_secure: bool = Field(True, alias="SESSION_COOKIE_SECURE")
     ollama_base_url: str = Field(..., alias="OLLAMA_BASE_URL")
     ollama_model: str = Field("qwen2.5:3b-instruct", alias="OLLAMA_MODEL")
