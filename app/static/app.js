@@ -188,17 +188,32 @@ function renderConversations() {
     elements.conversationList.append(empty);
     return;
   }
-
+  
   for (const conversation of appState.conversations) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "conversation-button";
-    if (conversation.id === appState.activeConversationId) {
-      button.classList.add("is-active");
-    }
-    button.textContent = conversation.title;
-    button.addEventListener("click", () => selectConversation(conversation.id));
-    elements.conversationList.append(button);
+     const item = document.createElement("div");
+     item.className = "conversation-item";
+   
+     const button = document.createElement("button");
+     button.type = "button";
+     button.className = "conversation-button";
+     if (conversation.id === appState.activeConversationId) {
+       button.classList.add("is-active");
+     }
+     button.textContent = conversation.title;
+     button.addEventListener("click", () => selectConversation(conversation.id));
+   
+     const deleteBtn = document.createElement("button");
+     deleteBtn.type = "button";
+     deleteBtn.className = "delete-button";
+     deleteBtn.textContent = "✕";
+     deleteBtn.title = "Delete conversation";
+     deleteBtn.addEventListener("click", (e) => {
+       e.stopPropagation();
+       deleteConversation(conversation.id);
+     });
+   
+    item.append(button, deleteBtn);
+    elements.conversationList.append(item);
   }
 }
 
@@ -524,3 +539,17 @@ elements.composerForm.addEventListener("submit", handleSend);
 bootstrap().catch((error) => {
   setStatus(`Startup error: ${error.message}`);
 });
+
+async function deleteConversation(conversationId) {
+
+	if (!confirm("Delete this conversation?")) {
+		return;
+	}
+
+	await request(`/api/conversations/${conversationId}`, { method: "DELETE" });
+	if (appState.activeConversationId === conversationId) {
+		resetConversationView();
+	}
+
+	await refreshConversations();
+}
