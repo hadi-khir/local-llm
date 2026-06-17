@@ -25,6 +25,7 @@
 body {
   margin: 0;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
@@ -42,6 +43,7 @@ textarea {
   display: grid;
   grid-template-columns: 260px 1fr;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -51,6 +53,7 @@ textarea {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   background: var(--sidebar-bg);
   border-right: 1px solid var(--panel-border);
   overflow: hidden;
@@ -165,6 +168,8 @@ textarea {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   overflow: hidden;
   background: var(--bg);
 }
@@ -197,7 +202,8 @@ textarea {
 .chat-app {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -581,6 +587,7 @@ textarea {
 @media (max-width: 768px) {
   .shell {
     grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
   }
 
   .sidebar {
@@ -606,6 +613,8 @@ textarea {
 
   .chat-panel {
     grid-column: 1;
+    grid-row: 1;
+    width: 100%;
   }
 
   .message-list {
@@ -618,7 +627,7 @@ textarea {
   }
 
   .composer {
-    padding: 10px 14px 16px;
+    padding: 10px 14px max(16px, env(safe-area-inset-bottom));
   }
 
   .message--user {

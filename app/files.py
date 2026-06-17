@@ -5,11 +5,19 @@ import mimetypes
 import uuid
 from pathlib import Path
 
+# Register HEIC/HEIF since Python's mimetypes db omits them
+mimetypes.add_type("image/heic", ".heic")
+mimetypes.add_type("image/heif", ".heif")
+mimetypes.add_type("image/heic", ".HEIC")
+mimetypes.add_type("image/heif", ".HEIF")
+
 ALLOWED_CONTENT_TYPES = {
     "image/jpeg",
     "image/png",
     "image/gif",
     "image/webp",
+    "image/heic",
+    "image/heif",
     "application/pdf",
     "text/plain",
     "text/markdown",
@@ -32,6 +40,8 @@ IMAGE_CONTENT_TYPES = {
     "image/png",
     "image/gif",
     "image/webp",
+    "image/heic",
+    "image/heif",
 }
 
 
