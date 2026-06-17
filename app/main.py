@@ -246,13 +246,13 @@ def create_app() -> FastAPI:
     @app.delete(
         "/api/conversations/{conversation_id}",
         dependencies=[Depends(require_authenticated_user)],
-        status_code=status.HTTP_204_NO_CONTENT,
         response_class=Response,
     )
-    async def delete_conversation(conversation_id: int, request: Request) -> None:
+    async def delete_conversation(conversation_id: int, request: Request) -> Response:
         storage: Storage = request.app.state.storage
         if not storage.delete_conversation(conversation_id):
             raise HTTPException(status_code=404, detail="Conversation not found.")
+        return Response(status_code=204)
 
     return app
 
