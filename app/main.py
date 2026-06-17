@@ -243,8 +243,18 @@ def create_app() -> FastAPI:
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
-    return app
+    @app.delete(
+        "/api/conversations/{conversation_id}",
+        dependencies=[Depends(require_authenticated_user)],
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    async def delete_conversation(conversation_id: int, request: Request) -> None:
+        storage: Storage = request.app.state.storage
+        if not storage.delete_conversation(conversation_id):
+            raise HTTPException(status_code=404, detail="Conversation not found.")
 
+    return app
+        
 
 def _sse_message(event: str, payload: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(payload)}\n\n"

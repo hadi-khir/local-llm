@@ -347,6 +347,14 @@ class Storage:
             ).fetchone()
         return row is not None
 
+    def delete_conversation(self, conversation_id: int) -> bool:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "DELETE from conversations where id = ?",
+                (conversation_id, ),
+            )
+        return cursor.rowcount > 0
+
     def _touch_conversation(self, connection: sqlite3.Connection, conversation_id: int) -> None:
         connection.execute(
             """
