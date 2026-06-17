@@ -8,7 +8,8 @@
   </head>
   <body>
     <div class="shell">
-      <aside class="sidebar">
+      <div class="sidebar-overlay" id="sidebar-overlay"></div>
+      <aside class="sidebar" id="sidebar">
         <div class="sidebar__header">
           <h1>{{ app_name }}</h1>
           <button id="new-chat-button" class="ghost-button" type="button">New chat</button>
@@ -43,9 +44,12 @@
 
         <section id="chat-app" class="chat-app" hidden>
           <header class="chat-app__header">
-            <div>
-              <p class="eyebrow">Remote AI chat</p>
-              <h2 id="conversation-title">New conversation</h2>
+            <div style="display:flex;align-items:center;gap:10px;min-width:0">
+              <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Open sidebar">☰</button>
+              <div style="min-width:0">
+                <p class="eyebrow">Remote AI chat</p>
+                <h2 id="conversation-title">New conversation</h2>
+              </div>
             </div>
             <button id="logout-button" class="ghost-button" type="button">Log out</button>
           </header>

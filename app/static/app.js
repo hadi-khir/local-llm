@@ -25,6 +25,9 @@ const elements = {
   promptInput: document.querySelector("#prompt-input"),
   composerError: document.querySelector("#composer-error"),
   sendButton: document.querySelector("#send-button"),
+  sidebar: document.querySelector("#sidebar"),
+  sidebarToggle: document.querySelector("#sidebar-toggle"),
+  sidebarOverlay: document.querySelector("#sidebar-overlay"),
 };
 
 function createRequestId() {
@@ -379,6 +382,7 @@ async function selectConversation(conversationId) {
   );
   elements.conversationTitle.textContent = active?.title || "Conversation";
   renderConversations();
+  toggleSidebar(false);
   await loadConversationMessages(conversationId);
 }
 
@@ -516,10 +520,18 @@ async function handleSend(event) {
   }
 }
 
+function toggleSidebar(open) {
+  const isOpen = open ?? !elements.sidebar.classList.contains("is-open");
+  elements.sidebar.classList.toggle("is-open", isOpen);
+  elements.sidebarOverlay.classList.toggle("is-open", isOpen);
+}
+
 elements.loginForm.addEventListener("submit", handleLogin);
 elements.logoutButton.addEventListener("click", handleLogout);
 elements.newChatButton.addEventListener("click", resetConversationView);
 elements.composerForm.addEventListener("submit", handleSend);
+elements.sidebarToggle.addEventListener("click", () => toggleSidebar());
+elements.sidebarOverlay.addEventListener("click", () => toggleSidebar(false));
 
 bootstrap().catch((error) => {
   setStatus(`Startup error: ${error.message}`);
