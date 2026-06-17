@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     ollama_model: str = Field("qwen2.5:3b-instruct", alias="OLLAMA_MODEL")
     database_path: Path = Field(Path("app.db"), alias="DATABASE_PATH")
     upload_dir: Path = Field(Path("/data/uploads"), alias="UPLOAD_DIR")
-    max_upload_bytes: int = Field(20 * 1024 * 1024, alias="MAX_UPLOAD_BYTES")
+    max_upload_bytes: int = Field(100 * 1024 * 1024, alias="MAX_UPLOAD_BYTES")
     host: str = Field("0.0.0.0", alias="HOST")
     port: int = Field(8000, alias="PORT")
 
