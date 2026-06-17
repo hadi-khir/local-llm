@@ -436,6 +436,9 @@ async function refreshModels() {
     appState.availableModels = data.models || [];
     appState.selectedModel = appState.selectedModel || data.default || appState.availableModels[0] || null;
     renderModelSelect();
+    if (appState.availableModels.length) {
+      setStatus(`Models: ${appState.availableModels.join(", ")} · Ollama: ok`);
+    }
   } catch {
     // non-fatal — model selector stays hidden
   }
