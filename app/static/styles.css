@@ -333,7 +333,7 @@ textarea {
   flex-shrink: 0;
 }
 
-.composer textarea {
+.composer__input-row textarea {
   width: 100%;
   padding: 12px 14px;
   border: 1px solid var(--panel-border);
@@ -345,17 +345,127 @@ textarea {
   transition: border-color 150ms;
 }
 
-.composer textarea:focus {
+.composer__input-row textarea:focus {
   outline: none;
   border-color: var(--accent);
 }
 
 .composer__footer {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
   gap: 10px;
   margin-top: 10px;
+}
+
+.composer__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Attachment chips */
+
+.attachment-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px 4px 10px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 20px;
+  font-size: 0.8rem;
+  color: var(--text);
+  max-width: 220px;
+}
+
+.attachment-chip span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.attachment-chip__remove {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 2px 3px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: color 120ms, background 120ms;
+}
+
+.attachment-chip__remove:hover {
+  color: var(--danger);
+  background: rgba(248, 113, 113, 0.12);
+}
+
+/* Attach (paperclip) button */
+
+.attach-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+
+.attach-button:hover {
+  color: var(--text);
+  border-color: var(--muted);
+  background: var(--panel);
+}
+
+.attach-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Model selector */
+
+.model-select-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.model-select-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.model-select {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: border-color 150ms;
+}
+
+.model-select:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 /* Buttons */

@@ -8,17 +8,18 @@ from typing import AsyncIterator
 from uuid import uuid4
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, status
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import authenticate_user, require_authenticated_user
 from app.config import Settings, get_settings
+from app.files import guess_content_type, is_allowed, save_upload
 from app.generation import GenerationManager
 from app.ollama import OllamaClient
-from app.schemas import ChatRequest, ConversationResponse, LoginRequest, MessageResponse
+from app.schemas import AttachmentResponse, ChatRequest, ConversationResponse, LoginRequest, MessageResponse
 from app.storage import Storage, build_conversation_title
 
 
@@ -125,6 +126,61 @@ def create_app() -> FastAPI:
         return request.app.state.storage.list_conversations()
 
     @app.get(
+        "/api/models",
+        dependencies=[Depends(require_authenticated_user)],
+    )
+    async def list_models(request: Request) -> dict[str, object]:
+        try:
+            models = await request.app.state.ollama.list_models()
+        except (httpx.HTTPError, ValueError):
+            models = []
+        return {"models": models, "default": settings.ollama_model}
+
+    @app.post(
+        "/api/upload",
+        dependencies=[Depends(require_authenticated_user)],
+        response_model=AttachmentResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def upload_file(file: UploadFile, request: Request) -> dict[str, object]:
+        storage: Storage = request.app.state.storage
+        data = await file.read()
+
+        if len(data) > settings.max_upload_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size is {settings.max_upload_bytes // (1024 * 1024)} MB.",
+            )
+
+        content_type = file.content_type or guess_content_type(file.filename or "")
+        if not is_allowed(content_type):
+            raise HTTPException(
+                status_code=415,
+                detail=f"Unsupported file type: {content_type}.",
+            )
+
+        filename = file.filename or "upload"
+        _, file_path = save_upload(data, filename, settings.upload_dir)
+        attachment_id = storage.create_attachment(filename, content_type, file_path)
+        attachment = storage.get_attachment(attachment_id)
+        return attachment  # type: ignore[return-value]
+
+    @app.get(
+        "/api/attachments/{attachment_id}",
+        dependencies=[Depends(require_authenticated_user)],
+    )
+    async def get_attachment_file(attachment_id: int, request: Request) -> FileResponse:
+        storage: Storage = request.app.state.storage
+        attachment = storage.get_attachment(attachment_id)
+        if attachment is None:
+            raise HTTPException(status_code=404, detail="Attachment not found.")
+        return FileResponse(
+            attachment["file_path"],
+            media_type=attachment["content_type"],
+            filename=attachment["filename"],
+        )
+
+    @app.get(
         "/api/conversations/{conversation_id}/messages",
         dependencies=[Depends(require_authenticated_user)],
         response_model=list[MessageResponse],
@@ -151,12 +207,15 @@ def create_app() -> FastAPI:
             conversation_id = payload.conversation_id
             if conversation_id is None:
                 conversation_id = storage.create_conversation(
-                    build_conversation_title(payload.prompt)
+                    build_conversation_title(payload.prompt),
+                    model=payload.model,
                 )
             elif not storage.conversation_exists(conversation_id):
                 raise HTTPException(status_code=404, detail="Conversation not found.")
 
             user_message_id = storage.add_message(conversation_id, "user", payload.prompt)
+            if payload.attachment_ids:
+                storage.link_attachments_to_message(payload.attachment_ids, user_message_id)
             assistant_message_id = storage.add_message(
                 conversation_id,
                 "assistant",
@@ -173,10 +232,16 @@ def create_app() -> FastAPI:
                 conversation_id,
                 before_message_id=assistant_message_id,
             )
+            conversation_model = (
+                payload.model
+                or (storage.get_conversation(conversation_id) or {}).get("model")
+            )
             generation_manager.start(
                 request_id=request_id,
                 assistant_message_id=assistant_message_id,
                 model_messages=model_messages,
+                model=conversation_model,
+                attachment_ids=payload.attachment_ids,
             )
             generation_job = storage.get_generation_job(request_id)
 

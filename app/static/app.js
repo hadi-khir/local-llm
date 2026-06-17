@@ -6,6 +6,9 @@ const appState = {
   isSending: false,
   isLiveStreaming: false,
   messagePollTimer: null,
+  availableModels: [],
+  selectedModel: null,
+  pendingAttachments: [], // [{id, filename, content_type}]
 };
 
 const elements = {
@@ -25,6 +28,11 @@ const elements = {
   promptInput: document.querySelector("#prompt-input"),
   composerError: document.querySelector("#composer-error"),
   sendButton: document.querySelector("#send-button"),
+  attachButton: document.querySelector("#attach-button"),
+  fileInput: document.querySelector("#file-input"),
+  attachmentChips: document.querySelector("#attachment-chips"),
+  modelSelect: document.querySelector("#model-select"),
+  modelSelectWrapper: document.querySelector("#model-select-wrapper"),
   sidebar: document.querySelector("#sidebar"),
   sidebarToggle: document.querySelector("#sidebar-toggle"),
   sidebarOverlay: document.querySelector("#sidebar-overlay"),
@@ -347,6 +355,67 @@ function updateSendingState(isSending) {
   appState.isSending = isSending;
   elements.sendButton.disabled = isSending;
   elements.promptInput.disabled = isSending;
+  if (elements.attachButton) elements.attachButton.disabled = isSending;
+}
+
+function renderAttachmentChips() {
+  if (!elements.attachmentChips) return;
+  elements.attachmentChips.innerHTML = "";
+  elements.attachmentChips.hidden = appState.pendingAttachments.length === 0;
+
+  for (const att of appState.pendingAttachments) {
+    const chip = document.createElement("div");
+    chip.className = "attachment-chip";
+
+    const icon = att.content_type.startsWith("image/") ? "🖼" :
+                 att.content_type === "application/pdf" ? "📄" : "📎";
+
+    const label = document.createElement("span");
+    label.textContent = `${icon} ${att.filename}`;
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "attachment-chip__remove";
+    remove.textContent = "✕";
+    remove.title = "Remove attachment";
+    remove.addEventListener("click", () => {
+      appState.pendingAttachments = appState.pendingAttachments.filter((a) => a.id !== att.id);
+      renderAttachmentChips();
+    });
+
+    chip.append(label, remove);
+    elements.attachmentChips.append(chip);
+  }
+}
+
+async function handleFileSelect(event) {
+  const files = Array.from(event.target.files || []);
+  if (!files.length) return;
+
+  // Reset input so the same file can be re-selected
+  event.target.value = "";
+
+  for (const file of files) {
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        credentials: "same-origin",
+        body: formData,
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        setComposerError(payload.detail || "Upload failed.");
+        continue;
+      }
+      const att = await response.json();
+      appState.pendingAttachments.push(att);
+      renderAttachmentChips();
+    } catch {
+      setComposerError("Upload failed — check your connection.");
+    }
+  }
 }
 
 async function bootstrap() {
@@ -357,8 +426,39 @@ async function bootstrap() {
   appState.authenticated = auth.authenticated;
   renderAuthState();
   if (appState.authenticated) {
-    await refreshConversations();
+    await Promise.all([refreshConversations(), refreshModels()]);
   }
+}
+
+async function refreshModels() {
+  try {
+    const data = await request("/api/models");
+    appState.availableModels = data.models || [];
+    appState.selectedModel = appState.selectedModel || data.default || appState.availableModels[0] || null;
+    renderModelSelect();
+  } catch {
+    // non-fatal — model selector stays hidden
+  }
+}
+
+function renderModelSelect() {
+  const select = elements.modelSelect;
+  if (!select) return;
+  select.innerHTML = "";
+  for (const name of appState.availableModels) {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    if (name === appState.selectedModel) opt.selected = true;
+    select.append(opt);
+  }
+  updateModelSelectVisibility();
+}
+
+function updateModelSelectVisibility() {
+  if (!elements.modelSelectWrapper) return;
+  // Only show selector when no active conversation (new chat)
+  elements.modelSelectWrapper.hidden = Boolean(appState.activeConversationId);
 }
 
 async function refreshConversations() {
@@ -397,6 +497,7 @@ async function selectConversation(conversationId) {
   );
   elements.conversationTitle.textContent = active?.title || "Conversation";
   renderConversations();
+  updateModelSelectVisibility();
   toggleSidebar(false);
   await loadConversationMessages(conversationId);
 }
@@ -415,7 +516,7 @@ async function handleLogin(event) {
     appState.authenticated = true;
     renderAuthState();
     elements.password.value = "";
-    await refreshConversations();
+    await Promise.all([refreshConversations(), refreshModels()]);
   } catch (error) {
     setLoginError(error.message);
   }
@@ -439,6 +540,7 @@ function resetConversationView() {
   appState.activeMessages = [];
   elements.conversationTitle.textContent = "New conversation";
   elements.messageList.innerHTML = "";
+  updateModelSelectVisibility();
 }
 
 async function handleSend(event) {
@@ -454,11 +556,14 @@ async function handleSend(event) {
   }
 
   const requestId = createRequestId();
+  const attachmentIds = appState.pendingAttachments.map((a) => a.id);
   setComposerError();
   clearMessagePolling();
   updateSendingState(true);
   appState.isLiveStreaming = true;
   elements.promptInput.value = "";
+  appState.pendingAttachments = [];
+  renderAttachmentChips();
 
   let assistantMessageId = null;
   let conversationId = appState.activeConversationId;
@@ -472,6 +577,8 @@ async function handleSend(event) {
         prompt,
         conversation_id: appState.activeConversationId,
         request_id: requestId,
+        model: appState.activeConversationId ? null : (elements.modelSelect?.value || appState.selectedModel),
+        attachment_ids: attachmentIds.length ? attachmentIds : null,
       }),
     });
 
@@ -547,6 +654,11 @@ elements.newChatButton.addEventListener("click", resetConversationView);
 elements.composerForm.addEventListener("submit", handleSend);
 elements.sidebarToggle.addEventListener("click", () => toggleSidebar());
 elements.sidebarOverlay.addEventListener("click", () => toggleSidebar(false));
+elements.modelSelect?.addEventListener("change", () => {
+  appState.selectedModel = elements.modelSelect.value;
+});
+elements.attachButton?.addEventListener("click", () => elements.fileInput?.click());
+elements.fileInput?.addEventListener("change", handleFileSelect);
 
 bootstrap().catch((error) => {
   setStatus(`Startup error: ${error.message}`);

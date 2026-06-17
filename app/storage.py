@@ -13,6 +13,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
+    model TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -25,6 +26,15 @@ CREATE TABLE IF NOT EXISTS messages (
     status TEXT NOT NULL DEFAULT 'completed'
         CHECK(status IN ('pending', 'streaming', 'completed', 'failed')),
     error TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    filename TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    file_path TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -45,6 +55,9 @@ ON messages(conversation_id, id);
 
 CREATE INDEX IF NOT EXISTS idx_generation_jobs_conversation_id
 ON generation_jobs(conversation_id, assistant_message_id);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_message_id
+ON attachments(message_id);
 """
 
 
@@ -83,6 +96,12 @@ class Storage:
                 "error",
                 "ALTER TABLE messages ADD COLUMN error TEXT",
             )
+            self._ensure_column(
+                connection,
+                "conversations",
+                "model",
+                "ALTER TABLE conversations ADD COLUMN model TEXT",
+            )
 
     def _ensure_column(
         self,
@@ -102,7 +121,7 @@ class Storage:
         with self.connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, title, created_at, updated_at
+                SELECT id, title, model, created_at, updated_at
                 FROM conversations
                 ORDER BY updated_at DESC, id DESC
                 """
@@ -113,7 +132,7 @@ class Storage:
         with self.connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, title, created_at, updated_at
+                SELECT id, title, model, created_at, updated_at
                 FROM conversations
                 WHERE id = ?
                 """,
@@ -165,11 +184,11 @@ class Storage:
             rows = connection.execute(query, tuple(parameters)).fetchall()
         return [{"role": row["role"], "content": row["content"]} for row in rows]
 
-    def create_conversation(self, title: str) -> int:
+    def create_conversation(self, title: str, model: str | None = None) -> int:
         with self.connect() as connection:
             cursor = connection.execute(
-                "INSERT INTO conversations (title) VALUES (?)",
-                (title,),
+                "INSERT INTO conversations (title, model) VALUES (?, ?)",
+                (title, model),
             )
             return int(cursor.lastrowid)
 
@@ -354,6 +373,56 @@ class Storage:
                 (conversation_id, ),
             )
         return cursor.rowcount > 0
+
+    def create_attachment(
+        self, filename: str, content_type: str, file_path: str
+    ) -> int:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO attachments (filename, content_type, file_path)
+                VALUES (?, ?, ?)
+                """,
+                (filename, content_type, file_path),
+            )
+            return int(cursor.lastrowid)
+
+    def get_attachment(self, attachment_id: int) -> dict[str, Any] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, message_id, filename, content_type, file_path, created_at
+                FROM attachments
+                WHERE id = ?
+                """,
+                (attachment_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_attachments_for_message(self, message_id: int) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, message_id, filename, content_type, file_path, created_at
+                FROM attachments
+                WHERE message_id = ?
+                ORDER BY id ASC
+                """,
+                (message_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def link_attachments_to_message(
+        self, attachment_ids: list[int], message_id: int
+    ) -> None:
+        if not attachment_ids:
+            return
+        with self.connect() as connection:
+            placeholders = ",".join("?" for _ in attachment_ids)
+            connection.execute(
+                f"UPDATE attachments SET message_id = ? WHERE id IN ({placeholders})",
+                (message_id, *attachment_ids),
+            )
 
     def _touch_conversation(self, connection: sqlite3.Connection, conversation_id: int) -> None:
         connection.execute(

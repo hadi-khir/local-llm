@@ -18,12 +18,25 @@ class OllamaClient:
             response.raise_for_status()
             return response.json()
 
+    async def list_models(self) -> list[str]:
+        data = await self.health_check()
+        return sorted(m["name"] for m in data.get("models", []))
+
     async def stream_chat(
-        self, messages: list[dict[str, str]]
+        self, messages: list[dict[str, str]], model: str | None = None,
+        images: list[str] | None = None,
     ) -> AsyncIterator[str]:
+        # Attach images to the last user message if provided
+        final_messages: list[dict[str, Any]] = []
+        for i, msg in enumerate(messages):
+            entry: dict[str, Any] = dict(msg)
+            if images and i == len(messages) - 1 and msg.get("role") == "user":
+                entry["images"] = images
+            final_messages.append(entry)
+
         payload = {
-            "model": self.model,
-            "messages": messages,
+            "model": model or self.model,
+            "messages": final_messages,
             "stream": True,
         }
         async with httpx.AsyncClient(timeout=self.timeout) as client:
