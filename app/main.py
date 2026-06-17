@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -247,6 +247,7 @@ def create_app() -> FastAPI:
         "/api/conversations/{conversation_id}",
         dependencies=[Depends(require_authenticated_user)],
         status_code=status.HTTP_204_NO_CONTENT,
+        response_class=Response,
     )
     async def delete_conversation(conversation_id: int, request: Request) -> None:
         storage: Storage = request.app.state.storage
@@ -254,7 +255,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Conversation not found.")
 
     return app
-        
+
 
 def _sse_message(event: str, payload: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
