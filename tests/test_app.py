@@ -29,6 +29,7 @@ def test_login_flow(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
     monkeypatch.setenv("ADMIN_PASSWORD", "password")
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:3b-instruct")
     monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
 
     with create_test_client(tmp_path) as client:
@@ -43,6 +44,7 @@ def test_requires_auth_for_conversations(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
     monkeypatch.setenv("ADMIN_PASSWORD", "password")
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:3b-instruct")
     monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
 
     with create_test_client(tmp_path) as client:
@@ -55,24 +57,28 @@ def test_chat_completes_and_persists_messages(tmp_path: Path, monkeypatch) -> No
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
     monkeypatch.setenv("ADMIN_PASSWORD", "password")
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:3b-instruct")
     monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
 
     with create_test_client(tmp_path) as client:
         login(client)
 
-        async def fake_stream_chat(_messages):
+        async def fake_stream_chat(_messages, model=None, images=None):
+            assert model == "qwen2.5:3b-instruct"
+            assert images is None
             yield "Hello"
             await asyncio.sleep(0.01)
             yield " world"
 
         client.app.state.ollama.stream_chat = fake_stream_chat
 
-        response = client.post(
+        with client.stream(
+            "POST",
             "/api/chat/stream",
             json={"prompt": "Say hello", "request_id": "req-hello"},
-        )
-        body = response.text
-        assert response.status_code == 200
+        ) as response:
+            body = "".join(response.iter_text())
+            assert response.status_code == 200
         assert "event: done" in body
 
         conversations = client.get("/api/conversations").json()
@@ -87,12 +93,15 @@ def test_generation_survives_stream_disconnect(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
     monkeypatch.setenv("ADMIN_PASSWORD", "password")
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:3b-instruct")
     monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
 
     with create_test_client(tmp_path) as client:
         login(client)
 
-        async def fake_stream_chat(_messages):
+        async def fake_stream_chat(_messages, model=None, images=None):
+            assert model == "qwen2.5:3b-instruct"
+            assert images is None
             yield "Partial"
             await asyncio.sleep(0.05)
             yield " response"
@@ -114,3 +123,95 @@ def test_generation_survives_stream_disconnect(tmp_path: Path, monkeypatch) -> N
         assert messages[-1]["role"] == "assistant"
         assert messages[-1]["content"] == "Partial response"
         assert messages[-1]["status"] == "completed"
+
+
+def test_new_conversation_persists_selected_model(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "password")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
+    monkeypatch.setenv("OLLAMA_MODEL", "default-model")
+
+    used_models: list[str | None] = []
+
+    with create_test_client(tmp_path) as client:
+        login(client)
+
+        async def fake_stream_chat(_messages, model=None, images=None):
+            used_models.append(model)
+            assert images is None
+            yield "Locked"
+
+        client.app.state.ollama.stream_chat = fake_stream_chat
+
+        with client.stream(
+            "POST",
+            "/api/chat/stream",
+            json={
+                "prompt": "Use another model",
+                "request_id": "req-model-lock",
+                "model": "llama3.1:8b",
+            },
+        ) as response:
+            body = "".join(response.iter_text())
+            assert response.status_code == 200
+        assert "event: done" in body
+        conversations = client.get("/api/conversations").json()
+        assert conversations[0]["model"] == "llama3.1:8b"
+        assert used_models == ["llama3.1:8b"]
+
+
+def test_existing_conversation_keeps_original_model(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "password")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
+    monkeypatch.setenv("OLLAMA_MODEL", "default-model")
+
+    used_models: list[str | None] = []
+
+    with create_test_client(tmp_path) as client:
+        login(client)
+
+        async def fake_stream_chat(_messages, model=None, images=None):
+            used_models.append(model)
+            assert images is None
+            yield "OK"
+
+        client.app.state.ollama.stream_chat = fake_stream_chat
+
+        with client.stream(
+            "POST",
+            "/api/chat/stream",
+            json={
+                "prompt": "First turn",
+                "request_id": "req-first-model",
+                "model": "llama3.1:8b",
+            },
+        ) as first:
+            first_body = "".join(first.iter_text())
+            assert first.status_code == 200
+        assert "event: done" in first_body
+
+        conversations = client.get("/api/conversations").json()
+        conversation_id = conversations[0]["id"]
+
+        with client.stream(
+            "POST",
+            "/api/chat/stream",
+            json={
+                "prompt": "Second turn",
+                "conversation_id": conversation_id,
+                "request_id": "req-second-model",
+                "model": "mistral:latest",
+            },
+        ) as second:
+            second_body = "".join(second.iter_text())
+            assert second.status_code == 200
+        assert "event: done" in second_body
+
+        conversations = client.get("/api/conversations").json()
+        assert conversations[0]["model"] == "llama3.1:8b"
+        assert used_models == ["llama3.1:8b", "llama3.1:8b"]

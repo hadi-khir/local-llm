@@ -8,6 +8,9 @@ const appState = {
   messagePollTimer: null,
   availableModels: [],
   selectedModel: null,
+  defaultModel: null,
+  ollamaStatus: "checking",
+  statusError: "",
   pendingAttachments: [], // [{id, filename, content_type}]
 };
 
@@ -22,6 +25,7 @@ const elements = {
   logoutButton: document.querySelector("#logout-button"),
   newChatButton: document.querySelector("#new-chat-button"),
   conversationTitle: document.querySelector("#conversation-title"),
+  conversationMeta: document.querySelector("#conversation-meta"),
   conversationList: document.querySelector("#conversation-list"),
   messageList: document.querySelector("#message-list"),
   composerForm: document.querySelector("#composer-form"),
@@ -210,7 +214,16 @@ function renderConversations() {
      if (conversation.id === appState.activeConversationId) {
        button.classList.add("is-active");
      }
-     button.textContent = conversation.title;
+     const title = document.createElement("span");
+     title.className = "conversation-button__title";
+     title.textContent = conversation.title;
+     button.append(title);
+     if (conversation.model) {
+       const meta = document.createElement("span");
+       meta.className = "conversation-button__meta";
+       meta.textContent = conversation.model;
+       button.append(meta);
+     }
      button.addEventListener("click", () => selectConversation(conversation.id));
    
      const deleteBtn = document.createElement("button");
@@ -228,17 +241,82 @@ function renderConversations() {
   }
 }
 
-function getAssistantPlaceholder(message) {
-  if (message.status === "failed") {
-    return message.error || "Generation failed.";
+function getActiveConversation() {
+  return appState.conversations.find(
+   (conversation) => conversation.id === appState.activeConversationId,
+  ) || null;
+}
+
+function getActiveConversationModel() {
+  return getActiveConversation()?.model || appState.defaultModel || null;
+}
+
+function renderStatusPill() {
+  if (appState.statusError) {
+   elements.statusPill.textContent = appState.statusError;
+   return;
   }
-  if (message.status === "pending") {
-    return "Thinking…";
+
+  const rows = [];
+  const activeModel = getActiveConversationModel();
+  const inFlight = appState.activeMessages.some((message) =>
+   message.role === "assistant" && ["pending", "streaming"].includes(message.status),
+  );
+
+  if (appState.activeConversationId && activeModel) {
+   rows.push(["This chat", activeModel]);
+  } else if (appState.selectedModel) {
+   rows.push(["Next chat", appState.selectedModel]);
   }
-  if (message.status === "streaming" && !message.content) {
-    return "Thinking…";
+
+  if (appState.defaultModel) {
+   rows.push(["Default", appState.defaultModel]);
   }
-  return "";
+
+  rows.push(["Ollama", appState.ollamaStatus || "unknown"]);
+  if (inFlight) {
+   rows.push(["Status", "Generating response"]);
+  }
+
+  elements.statusPill.innerHTML = rows
+   .map(
+     ([label, value]) =>
+       `<span class="status-pill__row"><span class="status-pill__label">${escapeHtml(label)}</span><span class="status-pill__value">${escapeHtml(value)}</span></span>`,
+   )
+   .join("");
+}
+
+function renderConversationMeta() {
+  const activeConversation = getActiveConversation();
+  if (activeConversation) {
+   elements.conversationMeta.textContent = `Model locked to ${activeConversation.model || appState.defaultModel || "default"}`;
+  } else if (appState.selectedModel) {
+   elements.conversationMeta.textContent = `New chat will use ${appState.selectedModel}`;
+  } else if (appState.defaultModel) {
+   elements.conversationMeta.textContent = `New chat will use ${appState.defaultModel}`;
+  } else {
+   elements.conversationMeta.textContent = "Select a model to start a new chat.";
+  }
+  renderStatusPill();
+}
+
+function createAssistantLoadingNode(message) {
+  const container = document.createElement("div");
+  container.className = "message-loading";
+
+  const dots = document.createElement("span");
+  dots.className = "message-loading__dots";
+  dots.setAttribute("aria-hidden", "true");
+  for (let index = 0; index < 3; index += 1) {
+   dots.append(document.createElement("span"));
+  }
+
+  const label = document.createElement("span");
+  label.className = "message-loading__label";
+  label.textContent = message.status === "pending" ? "Starting response…" : "Generating response…";
+
+  container.append(dots, label);
+  return container;
 }
 
 function appendMessage(message) {
@@ -247,28 +325,29 @@ function appendMessage(message) {
   article.dataset.messageId = String(message.id);
   setMessageContent(article, message);
 
-  if (message.status !== "completed") {
-    const status = document.createElement("p");
-    status.className = "message-status";
-    status.textContent =
-      message.status === "failed" ? message.error || "Failed" : "In progress…";
-    article.append(status);
-  }
-
   elements.messageList.append(article);
   return article;
 }
 
 function setMessageContent(node, message) {
+  node.innerHTML = "";
   if (message.role === "assistant") {
-    const placeholder = getAssistantPlaceholder(message);
-    node.dataset.rawContent = message.content || "";
-    if (message.content) {
-      renderMarkdown(node, message.content);
-      return;
-    }
-    node.textContent = placeholder;
-    return;
+   if (message.status === "failed") {
+     const error = document.createElement("p");
+     error.className = "message-error";
+     error.textContent = message.error || "Generation failed.";
+     node.append(error);
+     return;
+   }
+   if (message.status !== "completed") {
+     node.append(createAssistantLoadingNode(message));
+     return;
+   }
+   if (message.content) {
+     renderMarkdown(node, message.content);
+     return;
+   }
+   return;
   }
 
   node.textContent = message.content;
@@ -281,29 +360,8 @@ function renderMessages(messages) {
     appendMessage(message);
   }
   elements.messageList.scrollTop = elements.messageList.scrollHeight;
+  renderStatusPill();
   scheduleMessagePolling();
-}
-
-function updateMessageNode(messageId, nextContent) {
-  const node = elements.messageList.querySelector(`[data-message-id="${messageId}"]`);
-  if (!node) {
-    return;
-  }
-
-  const message = appState.activeMessages.find((entry) => entry.id === messageId);
-  if (!message) {
-    return;
-  }
-
-  message.content = nextContent;
-  message.status = "streaming";
-  node.innerHTML = "";
-  setMessageContent(node, message);
-  const status = document.createElement("p");
-  status.className = "message-status";
-  status.textContent = "In progress…";
-  node.append(status);
-  elements.messageList.scrollTop = elements.messageList.scrollHeight;
 }
 
 function clearMessagePolling() {
@@ -331,14 +389,9 @@ function scheduleMessagePolling() {
     try {
       await loadConversationMessages(appState.activeConversationId);
     } catch (error) {
-      setComposerError(error.message);
       scheduleMessagePolling();
     }
   }, 1500);
-}
-
-function setStatus(text) {
-  elements.statusPill.textContent = text;
 }
 
 function setComposerError(message = "") {
@@ -356,6 +409,7 @@ function updateSendingState(isSending) {
   elements.sendButton.disabled = isSending;
   elements.promptInput.disabled = isSending;
   if (elements.attachButton) elements.attachButton.disabled = isSending;
+  renderStatusPill();
 }
 
 function renderAttachmentChips() {
@@ -420,7 +474,10 @@ async function handleFileSelect(event) {
 
 async function bootstrap() {
   const health = await request("/api/health");
-  setStatus(`Model: ${health.model} · Ollama: ${health.ollama}`);
+  appState.defaultModel = health.model || null;
+  appState.ollamaStatus = health.ollama || "unknown";
+  appState.statusError = "";
+  renderStatusPill();
 
   const auth = await request("/api/auth/me");
   appState.authenticated = auth.authenticated;
@@ -434,11 +491,12 @@ async function refreshModels() {
   try {
     const data = await request("/api/models");
     appState.availableModels = data.models || [];
-    appState.selectedModel = appState.selectedModel || data.default || appState.availableModels[0] || null;
+    appState.defaultModel = data.default || appState.defaultModel || null;
+    appState.selectedModel = appState.selectedModel || appState.defaultModel || appState.availableModels[0] || null;
     renderModelSelect();
-    if (appState.availableModels.length) {
-      setStatus(`Models: ${appState.availableModels.join(", ")} · Ollama: ok`);
-    }
+    appState.ollamaStatus = "ok";
+    appState.statusError = "";
+    renderConversationMeta();
   } catch {
     // non-fatal — model selector stays hidden
   }
@@ -462,11 +520,13 @@ function updateModelSelectVisibility() {
   if (!elements.modelSelectWrapper) return;
   // Only show selector when no active conversation (new chat)
   elements.modelSelectWrapper.hidden = Boolean(appState.activeConversationId);
+  renderConversationMeta();
 }
 
 async function refreshConversations() {
   appState.conversations = await request("/api/conversations");
   renderConversations();
+  renderConversationMeta();
 
   if (!appState.activeConversationId && appState.conversations.length) {
     await selectConversation(appState.conversations[0].id);
@@ -535,6 +595,7 @@ async function handleLogout() {
   renderAuthState();
   renderConversations();
   elements.messageList.innerHTML = "";
+  renderConversationMeta();
 }
 
 function resetConversationView() {
@@ -543,7 +604,12 @@ function resetConversationView() {
   appState.activeMessages = [];
   elements.conversationTitle.textContent = "New conversation";
   elements.messageList.innerHTML = "";
+  setComposerError();
   updateModelSelectVisibility();
+}
+
+function getMessageById(messageId) {
+  return appState.activeMessages.find((message) => message.id === messageId) || null;
 }
 
 async function handleSend(event) {
@@ -619,13 +685,20 @@ async function handleSend(event) {
           appState.activeConversationId = conversationId;
           elements.conversationTitle.textContent = payload.title;
           await refreshConversations();
-          await selectConversation(conversationId);
+          renderConversations();
+          updateModelSelectVisibility();
+          toggleSidebar(false);
+          await loadConversationMessages(conversationId);
         } else if (eventName === "chunk" && assistantMessageId) {
-          const targetMessage = appState.activeMessages.find(
-            (message) => message.id === assistantMessageId,
-          );
-          const currentContent = targetMessage?.content || "";
-          updateMessageNode(assistantMessageId, `${currentContent}${payload.content}`);
+          const targetMessage = getMessageById(assistantMessageId);
+          if (targetMessage) {
+            targetMessage.status = "streaming";
+            const node = elements.messageList.querySelector(`[data-message-id="${assistantMessageId}"]`);
+            if (node) {
+              setMessageContent(node, targetMessage);
+            }
+            renderStatusPill();
+          }
         } else if (eventName === "error") {
           throw new Error(payload.detail);
         } else if (eventName === "done" && conversationId) {
@@ -634,9 +707,14 @@ async function handleSend(event) {
       }
     }
   } catch (error) {
-    setComposerError(error.message);
     if (conversationId) {
-      await loadConversationMessages(conversationId);
+      const messages = await loadConversationMessages(conversationId).catch(() => null);
+      const assistantMessage = assistantMessageId ? messages?.find((message) => message.id === assistantMessageId) : null;
+      if (!assistantMessage) {
+        setComposerError(error.message);
+      }
+    } else {
+      setComposerError(error.message);
     }
   } finally {
     appState.isLiveStreaming = false;
@@ -659,12 +737,14 @@ elements.sidebarToggle.addEventListener("click", () => toggleSidebar());
 elements.sidebarOverlay.addEventListener("click", () => toggleSidebar(false));
 elements.modelSelect?.addEventListener("change", () => {
   appState.selectedModel = elements.modelSelect.value;
+  renderConversationMeta();
 });
 elements.attachButton?.addEventListener("click", () => elements.fileInput?.click());
 elements.fileInput?.addEventListener("change", handleFileSelect);
 
 bootstrap().catch((error) => {
-  setStatus(`Startup error: ${error.message}`);
+  appState.statusError = `Startup error: ${error.message}`;
+  renderStatusPill();
 });
 
 async function deleteConversation(conversationId) {

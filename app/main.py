@@ -200,18 +200,26 @@ def create_app() -> FastAPI:
     async def stream_chat(payload: ChatRequest, request: Request) -> StreamingResponse:
         storage: Storage = request.app.state.storage
         generation_manager: GenerationManager = request.app.state.generation_manager
+        settings: Settings = request.app.state.settings
         request_id = payload.request_id or uuid4().hex
 
         generation_job = storage.get_generation_job(request_id)
         if generation_job is None:
             conversation_id = payload.conversation_id
+            conversation_model: str | None = None
             if conversation_id is None:
+                conversation_model = payload.model or settings.ollama_model
                 conversation_id = storage.create_conversation(
                     build_conversation_title(payload.prompt),
-                    model=payload.model,
+                    model=conversation_model,
                 )
-            elif not storage.conversation_exists(conversation_id):
-                raise HTTPException(status_code=404, detail="Conversation not found.")
+            else:
+                conversation = storage.get_conversation(conversation_id)
+                if conversation is None:
+                    raise HTTPException(status_code=404, detail="Conversation not found.")
+                conversation_model = conversation.get("model") or payload.model or settings.ollama_model
+                if conversation.get("model") != conversation_model:
+                    storage.update_conversation_model(conversation_id, conversation_model)
 
             user_message_id = storage.add_message(conversation_id, "user", payload.prompt)
             if payload.attachment_ids:
@@ -231,10 +239,6 @@ def create_app() -> FastAPI:
             model_messages = storage.get_model_messages(
                 conversation_id,
                 before_message_id=assistant_message_id,
-            )
-            conversation_model = (
-                payload.model
-                or (storage.get_conversation(conversation_id) or {}).get("model")
             )
             generation_manager.start(
                 request_id=request_id,

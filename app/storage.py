@@ -192,6 +192,17 @@ class Storage:
             )
             return int(cursor.lastrowid)
 
+    def update_conversation_model(self, conversation_id: int, model: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE conversations
+                SET model = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (model, conversation_id),
+            )
+
     def add_message(
         self,
         conversation_id: int,
